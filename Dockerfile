@@ -3,7 +3,7 @@ FROM docker.io/nvidia/cuda:11.8.0-devel-ubuntu22.04
 # Prevent stop building ubuntu at time zone selection.  
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Prepare and empty machine for building.
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     git \
     cmake \
@@ -18,26 +18,24 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 
+# Install micromamba
+ENV MAMBA_ROOT_PREFIX /micromamba
 RUN  curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C / bin/micromamba
 
-ENV MAMBA_ROOT_PREFIX /micromamba
-RUN micromamba create -n cf python=3.9 pytorch torchvision torchaudio pytorch-cuda=11.8 -c conda-forge -c pytorch-nightly -c nvidia
-RUN micromamba shell init --shell=bash --prefix=/micromamba
-ENV PATH /micromamba/envs/cf/bin:$PATH
-
-# Build and install COLMAP.
 COPY . /clip-fields
 WORKDIR /clip-fields
 
+# Environemntal variables for compiling cuda based dependencies
 ENV CUDA_ARCHITECTURES="89;86;75"
 ENV TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}
 ENV CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}
 ENV TORCH_CUDA_ARCH_LIST="8.9;8.6;7.5"
 ENV FORCE_CUDA="1"
-RUN pip install -r requirements.txt
 
-RUN cd gridencoder && python setup.py install
+# Install packages
+RUN micromamba env create -f environment.yml
+RUN micromamba shell init --shell=bash --prefix=/micromamba
+ENV PATH /micromamba/envs/clip-field/bin:$PATH
 
-RUN pip install jupyterlab
-
-WORKDIR /clip-fields
+# Compile grid encoder
+RUN cd gridencoder && python setup.py install && cd /clip-field

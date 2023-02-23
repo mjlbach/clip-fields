@@ -1,0 +1,15 @@
+name: clip-field
+channels:
+  - conda-forge
+  - pytorch-nightly
+  - nvidia
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8
+  - pip:
+    - -r requirements.txt
