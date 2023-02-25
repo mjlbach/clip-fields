@@ -1,8 +1,8 @@
 name: clip-field
 channels:
-  - conda-forge
   - pytorch-nightly
   - nvidia
+  - conda-forge
 dependencies:
   - python=3.9
   - pip
