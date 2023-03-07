@@ -27,3 +27,4 @@ pytorch-lightning==1.9.3
 pyquaternion==0.9.9
 pyliblzfse==0.4.1
 open3d==0.16.0
+jupyterlab

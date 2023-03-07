@@ -38,6 +38,4 @@ RUN pip install -r requirements.txt
 
 RUN cd gridencoder && python setup.py install
 
-RUN pip install jupyterlab
-
 WORKDIR /clip-fields
