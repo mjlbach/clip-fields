@@ -9,9 +9,12 @@ import open3d as o3d
 import tqdm
 from PIL import Image
 from quaternion import as_rotation_matrix, quaternion
+import os
+import h5py
 from torch.utils.data import Dataset
 
 from dataloaders.scannet_200_classes import CLASS_LABELS_200
+MAX_POINTS=10000000
 
 
 class R3DSemanticDataset(Dataset):
@@ -30,18 +33,62 @@ class R3DSemanticDataset(Dataset):
         else:
             self._classes = CLASS_LABELS_200
 
-        self._reshaped_depth = []
-        self._reshaped_conf = []
-        self._depth_images = []
-        self._rgb_images = []
-        self._confidences = []
+        self.hdf5_path = Path(path).with_suffix('.hdf5')
+        if self.hdf5_path.exists():
+            f = h5py.File(self.hdf5_path, 'r')
+            self._reshaped_depth = f["reshaped_depth"]
+            self._reshaped_conf = f["reshaped_conf"]
+            self._depth_images = f["depth_images"]
+            self._rgb_images = f["rgb_images"]
+            self._confidences = f["confidences"]
 
-        self._metadata = self._read_metadata()
-        self.global_xyzs = []
-        self.global_pcds = []
-        self._load_data()
-        self._reshape_all_depth_and_conf()
-        self.calculate_all_global_xyzs()
+            self._metadata = None
+            self.global_xyzs = f["global_xyzs"]
+            self.global_xyzs_valid =f["global_xyzs_valid"]
+            # self.global_pcds = f["global_pcds"]
+
+            self.rgb_width = f.attrs['rgb_width']
+            self.rgb_height = f.attrs['rgb_height']
+            self.fps = f.attrs['fps']
+            self.camera_matrix = f.attrs['camera_matrix']
+
+            self.image_size = (self.rgb_width, self.rgb_height)
+            self.poses = f["poses"]
+            self.init_pose = f.attrs["initPose"]
+            self.total_images = len(self.poses)
+
+            self._classes = f['classes']
+            self._id_to_name = {i: x for (i, x) in enumerate(self._classes)}
+            self.calculated_global_xyzs = True
+        else:
+            f = h5py.File(self.hdf5_path, 'w')
+            self._metadata = self._read_metadata()
+
+            depth_image_dims = self.total_images, 256, 192
+            rgb_image_dims = self.total_images, self.rgb_height, self.rgb_width, 3
+            reshaped_depth_dims = self.total_images, self.rgb_height, self.rgb_width
+            self._reshaped_depth = f.create_dataset("reshaped_depth", reshaped_depth_dims, 'f')
+            self._reshaped_conf = f.create_dataset("reshaped_conf", reshaped_depth_dims, 'f')
+            self._depth_images = f.create_dataset("depth_images", depth_image_dims, 'f')
+            self._rgb_images = f.create_dataset("rgb_images", rgb_image_dims, 'f')
+            self._confidences = f.create_dataset("confidences", depth_image_dims, 'f')
+
+            self.global_xyzs = f.create_dataset("global_xyzs", (self.total_images, MAX_POINTS, 3), dtype='f')
+            self.global_xyzs_valid = f.create_dataset("global_xyzs_valid", self.total_images, dtype='i')
+            # self.global_pcds = f.create_dataset("global_pcds", rgb_image_dims, 'f')
+            self.calculated_global_xyzs = False
+            self._load_data()
+            self._reshape_all_depth_and_conf()
+            self.calculate_all_global_xyzs()
+
+            f.create_dataset('poses', data=self.poses)
+            f.create_dataset('classes', data=self._classes)
+
+            f.attrs['rgb_width'] = self.rgb_width
+            f.attrs['rgb_height'] = self.rgb_height
+            f.attrs['fps'] = self.fps 
+            f.attrs['camera_matrix'] = self.camera_matrix
+            f.attrs['initPose'] = self.init_pose
 
     def _read_metadata(self):
         with self._path.open("metadata", "r") as f:
@@ -100,9 +147,9 @@ class R3DSemanticDataset(Dataset):
             rgb_img = self.load_image(rgb_filepath)
 
             # Now, convert depth image to real world XYZ pointcloud.
-            self._depth_images.append(depth_img)
-            self._rgb_images.append(rgb_img)
-            self._confidences.append(confidence)
+            self._depth_images[i] = depth_img
+            self._rgb_images[i] = rgb_img
+            self._confidences[i] = confidence
 
     def _reshape_all_depth_and_conf(self):
         for index in tqdm.trange(len(self.poses), desc="Upscaling depth and conf"):
@@ -111,14 +158,14 @@ class R3DSemanticDataset(Dataset):
             pil_img = Image.fromarray(depth_image)
             reshaped_img = pil_img.resize((self.rgb_width, self.rgb_height))
             reshaped_img = np.asarray(reshaped_img)
-            self._reshaped_depth.append(reshaped_img)
+            self._reshaped_depth[index] = reshaped_img
 
             # Upscale confidence as well
             confidence = self._confidences[index]
             conf_img = Image.fromarray(confidence)
             reshaped_conf = conf_img.resize((self.rgb_width, self.rgb_height))
             reshaped_conf = np.asarray(reshaped_conf)
-            self._reshaped_conf.append(reshaped_conf)
+            self._reshaped_conf[index] = reshaped_conf
 
     def get_global_xyz(self, index, depth_scale=1000.0, only_confident=True):
         reshaped_img = np.copy(self._reshaped_depth[index])
@@ -167,14 +214,17 @@ class R3DSemanticDataset(Dataset):
         return pcd
 
     def calculate_all_global_xyzs(self, only_confident=True):
-        if len(self.global_xyzs):
-            return self.global_xyzs, self.global_pcds
+        # if self.calculated_global_xyzs:
+        #     return self.global_xyzs, None
         for i in tqdm.trange(len(self.poses), desc="Calculating global XYZs"):
             global_xyz_pcd = self.get_global_xyz(i, only_confident=only_confident)
             global_xyz = np.asarray(global_xyz_pcd.points)
-            self.global_xyzs.append(global_xyz)
-            self.global_pcds.append(global_xyz_pcd)
-        return self.global_xyzs, self.global_pcds
+            self.global_xyzs[i] = np.pad(global_xyz, ((0, MAX_POINTS - global_xyz.shape[0]), (0,0)))
+            self.global_xyzs_valid[i] = global_xyz.shape[0]
+            # self.global_pcds[i] = global_xyz_pcd
+            self.calculated_global_xyzs = True
+            self.global_pcds = None
+        return self.global_xyzs, None
 
     def __len__(self):
         return len(self.poses)
@@ -182,6 +232,7 @@ class R3DSemanticDataset(Dataset):
     def __getitem__(self, idx):
         result = {
             "xyz_position": self.global_xyzs[idx],
+            "xyz_valid": self.global_xyzs_valid[idx],
             "rgb": self._rgb_images[idx],
             "depth": self._reshaped_depth[idx],
             "conf": self._reshaped_conf[idx],

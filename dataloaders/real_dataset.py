@@ -219,7 +219,8 @@ class DeticDenseLabelledDataset(Dataset):
             if idx not in images_to_label:
                 continue
             rgb = einops.rearrange(data_dict["rgb"][..., :3], "b h w c -> b c h w")
-            xyz = data_dict["xyz_position"]
+            # xyz = data_dict["xyz_position"]
+            xyz = data_dict["xyz_position"][:, :data_dict["xyz_valid"]]
             for image, coordinates in zip(rgb, xyz):
                 # Now calculate the Detic classification for this.
                 with torch.no_grad():
@@ -300,7 +301,8 @@ class DeticDenseLabelledDataset(Dataset):
                 if idx not in images_to_label:
                     continue
                 rgb = einops.rearrange(data_dict["rgb"][..., :3], "b h w c -> b c h w")
-                xyz = data_dict["xyz_position"]
+                # xyz = data_dict["xyz_position"]
+                xyz = data_dict["xyz_position"][:, :data_dict["xyz_valid"]]
                 for image, coordinates in zip(rgb, xyz):
                     # Now figure out the LSeg lables.
                     with torch.no_grad():
@@ -446,6 +448,10 @@ class DeticDenseLabelledDataset(Dataset):
 
     @staticmethod
     def process_text(x: str) -> str:
+        try:
+            x = x.decode()
+        except:
+            pass
         return x.replace("-", " ").replace("_", " ").lstrip().rstrip().lower()
 
     def _setup_detic_all_classes(self, view_data: R3DSemanticDataset):

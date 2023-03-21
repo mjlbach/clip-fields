@@ -1,4 +1,6 @@
 docker run --gpus all \
+	--ipc host \
 	--network host \
 	--privileged \
-	-it clip-fields
+	-v $HOME:$HOME \
+	-it clip-field
